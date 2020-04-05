@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>slit</title>
+	</head>
+<body>
+    
+	<canvas id="canvas" width="600" height="500"></canvas>
+	<div><br>
+	Height : &nbsp<input type="number" id="h" value="0.2" min="0" max="1" step=".01"><br>
+	Frequency : &nbsp<input type="number" id="w" value="100" min="0" max="1000"><br>
+	<br>
+</div>
+	<div id="shaders">
+		<script type="x-shader" id="vs">
+			attribute vec2 av;
+			void main () {gl_Position = vec4(av*2.-1., 0., 1.);}
+		</script>
+		<script type="x-shader" id="fs">
+			#ifdef GL_FRAGMENT_PRECISION_HIGH
+				precision highp float;
+			#else
+				precision mediump float;
+			#endif
+			#define Q gl_FragColor
+			#define U gl_FragCoord.xy
+			uniform vec2 R;
+			uniform float I;
+			uniform float w;
+			uniform float h;
+			vec2 e (float x) {return vec2(cos(x),sin(x));}
+			void main () {
+				vec2 u = 2.*(U-0.5*R)/R.y;
+				vec2 p = u;
+				u.x = min(u.x,1.);
+				vec2 v = vec2(0);
+				#define N 100.
+				for (float i = -N; i <= N; i++)
+					v += e(w*length(u-h*vec2(0,i)/N))/N;
+				Q = vec4(0.8,0,0,1)*atan(length(v));
+				v = atan(abs(v));
+				if (p.x<1.) Q = vec4(v.x,0.5*v.y+0.5*v.x,v.y,1);
+				Q.w = 1.;
+			}
+		</script>
+	</div>
+	<script id="gl-utilities">
+
+			class Framebuffer {
+	            constructor(gl, n, type, w, h = w, filter = 'LINEAR') {
+	                this.gl = gl;
+	                this.type = type;
+	                this.n = n;
+	                this.w = w;
+	                this.h = h;
+	                this.width = w;
+	                this.height = h;
+	                this.fb0 = gl.createFramebuffer();
+	                this.renderbuffer = gl.createRenderbuffer();
+	                this.texture = gl.createTexture();
+	                gl.activeTexture(gl['TEXTURE' + this.n]);
+	                gl.bindFramebuffer(gl.FRAMEBUFFER, this.fb0);
+	                gl.bindTexture(gl.TEXTURE_2D, this.texture);
+	                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+	                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+	                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl[filter]);
+	                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl[filter]);
+	                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, this.type, null);
+	                gl.bindRenderbuffer(gl.RENDERBUFFER, this.renderbuffer);
+	                gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, w, h);
+	                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.texture, 0);
+	                gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this.renderbuffer);
+	            }
+	            read() {
+	            	this.route();
+	            	var pixels = new Float32Array(this.w * this.h * 4);
+					this.gl.readPixels(0, 0, this.w, this.h, this.gl.RGBA, this.type, pixels);
+					return pixels;
+	            }
+	            write(typedArray) {
+	                this.gl.activeTexture(this.gl["TEXTURE" + this.n]);
+	                this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.w, this.h, 0, this.gl.RGBA, this.type, typedArray);
+	            }
+	            source(element) {
+	                this.gl.activeTexture(this.gl["TEXTURE" + this.n]);
+	                this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, true);
+	                this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.gl.RGBA, this.gl.UNSIGNED_BYTE, element);
+	                this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, false);
+	            }
+	            route() {
+	                this.gl.activeTexture(this.gl["TEXTURE" + this.n]);
+	                this.gl.bindTexture(this.gl.TEXTURE_2D, this.texture);
+	                this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.fb0);
+	                this.gl.viewport(0, 0, this.w, this.h);
+	            }
+	        }
+
+	        const createProgram = (gl, vstr, fstr) => {
+	            vstr = vstr.length < 20 && document.getElementById(vstr) ? document.getElementById(vstr).textContent : vstr
+	            fstr = fstr.length < 20 && document.getElementById(fstr) ? document.getElementById(fstr).textContent : fstr
+
+	            let program = gl.createProgram()
+	            let vshader = createShader(gl, vstr, gl.VERTEX_SHADER)
+	            let fshader = createShader(gl, fstr, gl.FRAGMENT_SHADER)
+
+	            gl.attachShader(program, vshader)
+	            gl.attachShader(program, fshader)
+	            gl.linkProgram(program);
+
+	            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+	                throw gl.getProgramInfoLog(program);
+	            }
+	            return program;
+	        }
+
+	        const createShader = (gl, str, type) => {
+	            let shader = gl.createShader(type)
+	            gl.shaderSource(shader, str)
+	            gl.compileShader(shader)
+
+	            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+	            	var errorString = gl.getShaderInfoLog(shader);
+	                alert(errorString + str.split('\n')[errorString.split(':')[2]-1]);
+	                throw gl.getShaderInfoLog(shader);
+	            }
+
+	            return shader;
+	        }
+
+	        const initAttrib = (gl, program) => {
+	            gl.useProgram(program);
+	            let attrib = gl.getAttribLocation(program, 'av');
+	            gl.enableVertexAttribArray(attrib);
+	            gl.vertexAttribPointer(attrib, 2, gl.FLOAT, gl.FALSE, 0, 0);
+	            return program;
+	        }
+
+	        const setUni = (gl, program, name, args, int = false) => {
+	            gl.useProgram(program);
+	            if (!program[name]) program[name] = gl.getUniformLocation(program, name);
+	            if (int || typeof (args) == "boolean") gl.uniform1i(program[name], args);
+	            else if (args.constructor == Array) gl["uniform" + args.length + "fv"](program[name], args);
+	            else if (typeof (args) == "number") gl.uniform1f(program[name], args);
+	            else if (args.constructor == Framebuffer) gl.uniform1i(program[name], args.n);
+	            return setUni;
+	        }
+
+	        const draw = (gl, program, dest, clear = false, type = gl.TRIANGLES, a = 0, b = 6) => {
+	            gl.useProgram(program);
+	            if (dest.route == undefined) {
+	            	gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+	                gl.viewport(0, 0, dest.width, dest.height);
+	            } else dest.route();
+	            if (clear) gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+	            gl.drawArrays(type, a, b);
+	        }
+
+	        const initVerts = (gl, w = 0, h = w) => {
+	            let arr = new Float32Array(w * h * 2 + 12), sqr = [0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1], i = 0;
+	            for (j = 0; j < 12; j++) arr[i++] = sqr[j];
+	            for (let y = 0; y < h; y++) {
+	                for (let x = 0; x < w; x++) {
+	                    arr[i++] = x / w;
+	                    arr[i++] = y / h;
+	                }
+	            }
+	            let buffer = gl.createBuffer();
+	            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+	            gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
+	            return arr;
+	        }
+	</script>
+	<script type="text/javascript">
+		var canvas = document.getElementById("canvas"),
+			gl = canvas.getContext("webgl"),
+			ext = gl.getExtension('OES_texture_float'),
+			lin = gl.getExtension('OES_texture_float_linear'),
+			program = createProgram (gl, "vs", "fs"),
+			verts = initVerts(gl);
+			initAttrib (gl, program);
+		var I = 0;
+		function  setI (I) {
+			setUni(gl, program, "I", I);
+			setUni(gl, program, "w", Number(document.getElementById("w").value));
+			setUni(gl, program, "h", Number(document.getElementById("h").value));
+		}
+		function setR () {
+			setUni(gl, program, "R", [canvas.width,canvas.height]);
+		}
+		function setMouse (mouse) {
+			setUni(gl, program, "mouse", mouse);
+		}
+		function setUnis () {
+			setR();
+			setI(I=0);
+		}
+		setUnis();
+
+		mouse = [0,0,0,0];
+		function animate () {
+			requestAnimationFrame (animate);
+			setI(I++);
+			setMouse(mouse);
+			draw (gl, program, canvas);
+		} animate ();
+		function  getMousePos(canvas, evt) {
+		  var rect = canvas.getBoundingClientRect(), // abs. size of element
+		      scaleX = canvas.width / rect.width,    // relationship bitmap vs. element for X
+		      scaleY = canvas.height / rect.height;  // relationship bitmap vs. element for Y
+
+		  return {
+		    x: (evt.clientX - rect.left) * scaleX,   // scale mouse coordinates after they have
+		    y: (evt.clientY - rect.top) * scaleY     // been adjusted to be relative to element
+		  }
+		}
+
+		canvas.onmousedown = function (e) {
+			var p = getMousePos (canvas, e);
+		    mouse =  [p.x,canvas.height-p.y,p.x,canvas.height-p.y];
+		}
+		canvas.onmousemove = function (e) {
+			var p = getMousePos (canvas, e);
+		    if (mouse[0]>0)
+		    mouse = [p.x,canvas.height-p.y,mouse[0],mouse[1]];
+		}
+		canvas.onmouseout = canvas.onmouseup = function (e) {
+			mouse = [0,0,0,0];
+		}
+	</script>
+</body>
+
+</html>

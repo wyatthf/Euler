@@ -1,0 +1,352 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>Waves</title>
+	</head>
+<body>
+	<h1>Standing Waves</h1>
+<div id="container">
+<div><br>
+	Mass (m) : &nbsp<input type="number" id="m" value="1" min="1" max="100"><br>
+	Spring Constant (k) : &nbsp<input type="number" id="k" value="1" min="0" max="100"><br>
+	Driving frequency (w) : &nbsp<input type="number" id="w" value="1" min="0" max="100"><br>
+	<br>
+</div>
+<div>
+	<canvas id="canvas" width="600" height="500"></canvas>
+</div>
+</div>
+	<div id="shaders">
+		<script type="x-shader" id="vs">
+			attribute vec2 av;
+			void main () {gl_Position = vec4(av*2.-1., 0., 1.);}
+		</script>
+		<script type="x-shader" id="fs">
+			#ifdef GL_FRAGMENT_PRECISION_HIGH
+				precision highp float;
+			#else
+				precision mediump float;
+			#endif
+			#define Q gl_FragColor
+			#define U gl_FragCoord.xy
+			uniform vec2 R;
+			uniform vec2 sR;
+			uniform sampler2D T;
+			uniform float I;
+			uniform float N;
+			float spring (vec2 u, vec2 a, vec2 b) {
+				vec2 v = b-a;
+				float r = clamp(dot(u-a,v)/dot(v,v),0.,1.);
+				vec2 p = a+(b-a)*r;
+				//u += vec2(-v.y,v.x)*cos(16./sqrt(N)*6.2*r)*.02;
+				return length(u-p);
+			}
+			vec4 get (float x) {
+				return texture2D(T,vec2(x,0)/sR)/sqrt(N+2.);
+			}
+			float ballnSpring (vec2 u) {
+			    float xx = (u.x*0.5+0.5)*(N+1.0);
+				float x = floor(xx+0.5);
+				vec4 l = get(x-1.), m = get(x+0.), r = get(x+1.);
+				vec2 
+					a = vec2((x-1.)/(N+1.)*2.-1., l.y),
+					b = vec2((x+0.)/(N+1.)*2.-1., m.y),
+					c = vec2((x+1.)/(N+1.)*2.-1., r.y);
+			    float k1 = l.w,
+			          k2 = m.w;
+			    float d = 1e3;
+				if (k1>0.) d =  min(d, spring(u,a,b)-0.001);
+				if (k1>0.) d =  min(d, spring(u,b,c)-0.001);
+				return d;
+			}
+			void main () {
+				vec2 u = 2.*(U-0.5*R)/R.x;
+				float b = ballnSpring (u);
+				b = smoothstep(.01,0.,b);
+				Q = vec4(vec3(b),1);
+			}
+		</script>
+		<script type="x-shader" id="sim">
+			#ifdef GL_FRAGMENT_PRECISION_HIGH
+				precision highp float;
+			#else
+				precision mediump float;
+			#endif
+			#define Q gl_FragColor
+			#define U gl_FragCoord.xy
+			uniform vec2 R;
+			uniform sampler2D T;
+			uniform float I;
+			uniform float N;
+			uniform float dt;
+			uniform float m;
+			uniform float k;
+			uniform float w;
+			vec4 A (vec2 u) {
+				return texture2D(T,u/R);
+			}
+			void sim (inout float y, inout float v, float y_left, float y_right, inout float m, inout float k, float dt, float x, float t) {
+				v += dt*k/m*0.5*(y_left-y+y_right-y);
+				y += dt*v;
+
+				if (x==0.0) y = sin(w*t);
+				if (x==N+1.0)  y = 0.0;   
+
+				if (t==0.0) { 
+				    y = 0.0;
+				    v = 0.0;
+				}
+			}
+			void main () {
+				Q = A(U);
+
+				float y, v, y_left, y_right;
+				y = Q.y;
+				v = Q.x;
+				y_left  = A(U-vec2(1,0)).y;
+				y_right = A(U+vec2(1,0)).y;
+                float x = floor(U.x);
+                float t = I*dt/N;
+                float M = m, K = k;
+				sim (y, v, y_left, y_right, M, K, dt, x, t);
+
+				Q = vec4(v,y,M,K);
+			}
+		</script>
+	</div>
+	<script id="gl-utilities">
+
+			class Framebuffer {
+	            constructor(gl, n, type, w, h = w, filter = 'LINEAR') {
+	                this.gl = gl;
+	                this.type = type;
+	                this.n = n;
+	                this.w = w;
+	                this.h = h;
+	                this.width = w;
+	                this.height = h;
+	                this.fb0 = gl.createFramebuffer();
+	                this.renderbuffer = gl.createRenderbuffer();
+	                this.texture = gl.createTexture();
+	                gl.activeTexture(gl['TEXTURE' + this.n]);
+	                gl.bindFramebuffer(gl.FRAMEBUFFER, this.fb0);
+	                gl.bindTexture(gl.TEXTURE_2D, this.texture);
+	                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+	                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+	                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl[filter]);
+	                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl[filter]);
+	                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, this.type, null);
+	                gl.bindRenderbuffer(gl.RENDERBUFFER, this.renderbuffer);
+	                gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, w, h);
+	                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.texture, 0);
+	                gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this.renderbuffer);
+	            }
+	            read() {
+	            	this.route();
+	            	var pixels = new Float32Array(this.w * this.h * 4);
+					this.gl.readPixels(0, 0, this.w, this.h, this.gl.RGBA, this.type, pixels);
+					return pixels;
+	            }
+	            write(typedArray) {
+	                this.gl.activeTexture(this.gl["TEXTURE" + this.n]);
+	                this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.w, this.h, 0, this.gl.RGBA, this.type, typedArray);
+	            }
+	            source(element) {
+	                this.gl.activeTexture(this.gl["TEXTURE" + this.n]);
+	                this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, true);
+	                this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.gl.RGBA, this.gl.UNSIGNED_BYTE, element);
+	                this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, false);
+	            }
+	            route() {
+	                this.gl.activeTexture(this.gl["TEXTURE" + this.n]);
+	                this.gl.bindTexture(this.gl.TEXTURE_2D, this.texture);
+	                this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.fb0);
+	                this.gl.viewport(0, 0, this.w, this.h);
+	            }
+	        }
+
+	        const createProgram = (gl, vstr, fstr) => {
+	            vstr = vstr.length < 20 && document.getElementById(vstr) ? document.getElementById(vstr).textContent : vstr
+	            fstr = fstr.length < 20 && document.getElementById(fstr) ? document.getElementById(fstr).textContent : fstr
+
+	            let program = gl.createProgram()
+	            let vshader = createShader(gl, vstr, gl.VERTEX_SHADER)
+	            let fshader = createShader(gl, fstr, gl.FRAGMENT_SHADER)
+
+	            gl.attachShader(program, vshader)
+	            gl.attachShader(program, fshader)
+	            gl.linkProgram(program);
+
+	            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+	                throw gl.getProgramInfoLog(program);
+	            }
+	            return program;
+	        }
+
+	        const createShader = (gl, str, type) => {
+	            let shader = gl.createShader(type)
+	            gl.shaderSource(shader, str)
+	            gl.compileShader(shader)
+
+	            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+	            	var errorString = gl.getShaderInfoLog(shader);
+	                alert(errorString + str.split('\n')[errorString.split(':')[2]-1]);
+	                throw gl.getShaderInfoLog(shader);
+	            }
+
+	            return shader;
+	        }
+
+	        const initAttrib = (gl, program) => {
+	            gl.useProgram(program);
+	            let attrib = gl.getAttribLocation(program, 'av');
+	            gl.enableVertexAttribArray(attrib);
+	            gl.vertexAttribPointer(attrib, 2, gl.FLOAT, gl.FALSE, 0, 0);
+	            return program;
+	        }
+
+	        const setUni = (gl, program, name, args, int = false) => {
+	            gl.useProgram(program);
+	            if (!program[name]) program[name] = gl.getUniformLocation(program, name);
+	            if (int || typeof (args) == "boolean") gl.uniform1i(program[name], args);
+	            else if (args.constructor == Array) gl["uniform" + args.length + "fv"](program[name], args);
+	            else if (typeof (args) == "number") gl.uniform1f(program[name], args);
+	            else if (args.constructor == Framebuffer) gl.uniform1i(program[name], args.n);
+	            return setUni;
+	        }
+
+	        const draw = (gl, program, dest, clear = false, type = gl.TRIANGLES, a = 0, b = 6) => {
+	            gl.useProgram(program);
+	            if (dest.route == undefined) {
+	            	gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+	                gl.viewport(0, 0, dest.width, dest.height);
+	            } else dest.route();
+	            if (clear) gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+	            gl.drawArrays(type, a, b);
+	        }
+
+	        const initVerts = (gl, w = 0, h = w) => {
+	            let arr = new Float32Array(w * h * 2 + 12), sqr = [0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1], i = 0;
+	            for (j = 0; j < 12; j++) arr[i++] = sqr[j];
+	            for (let y = 0; y < h; y++) {
+	                for (let x = 0; x < w; x++) {
+	                    arr[i++] = x / w;
+	                    arr[i++] = y / h;
+	                }
+	            }
+	            let buffer = gl.createBuffer();
+	            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+	            gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
+	            return arr;
+	        }
+	</script>
+	<script type="text/javascript">
+		var canvas = document.getElementById("canvas"),
+			gl = canvas.getContext("webgl"),
+			ext = gl.getExtension('OES_texture_float'),
+			lin = gl.getExtension('OES_texture_float_linear'),
+			fbo_a = new Framebuffer(gl, 0, gl.FLOAT, 502, 1, "NEAREST"),
+			fbo_b = new Framebuffer(gl, 1, gl.FLOAT, 502, 1, "NEAREST"),
+			sim_a = createProgram (gl, "vs", "sim"),
+			sim_b = createProgram (gl, "vs", "sim"),
+			program = createProgram (gl, "vs", "fs"),
+			verts = initVerts(gl);
+			initAttrib (gl, program);
+		var I = 0, N = 500,
+			m = document.getElementById("m"),
+			k = document.getElementById("k"),
+			w = document.getElementById("w");
+		function  setI (I) {
+			setUni(gl, program, "I", I);
+			setUni(gl, sim_a, "I", I);
+			setUni(gl, sim_b, "I", I);
+		}
+		function setR () {
+			setUni(gl, program, "R", [canvas.width,canvas.height]);
+			setUni(gl, program, "sR", [fbo_a.w, fbo_a.h]);
+			setUni(gl, sim_a, "R", [fbo_b.w, fbo_b.h]);
+			setUni(gl, sim_b, "R", [fbo_a.w, fbo_a.h]);
+		}
+		function setTx () {
+			setUni(gl, program, "T", fbo_a);
+			setUni(gl, sim_a, "T", fbo_b);
+			setUni(gl, sim_b, "T", fbo_a);
+		}
+		function setN (N) {
+			setUni(gl, program, "N", N);
+			setUni(gl, sim_a, "N", N);
+			setUni(gl, sim_b, "N", N);
+		}
+		function setUnis () {
+			setR();
+			setI(I=0);
+			setTx();
+			setN(500);
+			setUni(gl, sim_a, "dt", 0.05);
+			setUni(gl, sim_a, "k", Number(k.value));
+			setUni(gl, sim_a, "m", Number(m.value));
+			setUni(gl, sim_a, "w", Number(w.value));
+			setUni(gl, sim_b, "dt", 0.05);
+			setUni(gl, sim_b, "k", Number(k.value));
+			setUni(gl, sim_b, "m", Number(m.value));
+			setUni(gl, sim_b, "w", Number(w.value));
+		}
+		w.onchange = k.onchange = m.onchange = function () {
+			setUnis();
+		}
+		setUnis();
+		function animate () {
+			requestAnimationFrame (animate);
+			for (var i = 0; i < 500; i++) {
+			    setI(I++);
+				draw(gl, sim_a, fbo_a);
+				setI(I++);
+				draw(gl, sim_b, fbo_b);
+			}
+			draw (gl, program, canvas);
+		} animate ();
+	</script>
+</body>
+<style type="text/css">
+	#container {
+		display: flex;
+		flex-direction: row;
+	}
+	input[type=number] {
+		width: 80px;
+	}
+	canvas {
+		padding-left: 20px;
+		padding-right: 20px;
+	}
+	#text {
+		padding: 10px;
+		color:green;
+		background-color: black;
+		font-weight: bold;
+		font-size:17px;
+	}
+	#code {
+		padding: 10px;
+		color:white;
+		background-color: black;
+		font-weight: bold;
+		font-size:17px;
+		padding-bottom: 40px;}
+	#run {
+		padding: 10px;
+		font-size:28px;
+		right: 10px;
+		float: right;
+	}
+	button {
+		cursor: pointer;
+	}
+	body {
+  		font-family: Arial, Helvetica, sans-serif;
+	}
+</style>
+
+</html>

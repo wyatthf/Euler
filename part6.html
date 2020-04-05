@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bulma@0.8.0/css/bulma.min.css"
+    />
+    <link rel="stylesheet" href="main.css" />
+    <title>Waves</title>
+  </head>
+  <body>
+    <div class="container">
+      <div id="controls">
+        <div class="equation">
+          <h2>U(r) =</h2>
+          <input type="text" id="force" value="-1/r +0.01/r^2" class="input" />
+        </div>
+        <div class="select">
+          <select id="ExperimentSelect">
+            <option value="single">Single Body</option>
+            <option value="many"> Many Body </option>
+            <option value="wave"> Wave System</option>
+            <option value="plot"> Plot Potential</option>
+          </select>
+        </div>
+        <div id="dtinput">
+          dt:
+          <input type="range" id="dt" value="1" min="0" max="1" step=".01" />
+        </div>
+      </div>
+      <br />
+      <canvas id="2D" width="600" height="400" style="display: none;"></canvas>
+      <canvas id="3D" width="600" height="400"></canvas>
+    </div>
+    <div id="shaders">
+      <script type="x-shader" id="vs">
+        attribute vec2 av;
+        void main () {gl_Position = vec4(av*2.-1., 0., 1.);}
+      </script>
+      <script type="x-shader" id="force_A">
+        #ifdef GL_FRAGMENT_PRECISION_HIGH
+        	precision highp float;
+        #else
+        	precision mediump float;
+        #endif
+        #define e 2.71828182846
+        #define pi 3.14159265359
+        #define Q gl_FragColor
+        #define U gl_FragCoord.xy
+        uniform vec2 R;
+        uniform float I;
+        float u (float r) {return
+      </script>
+      <script type="x-shader" id="force_B">
+        ;}
+        float f (float r) {
+        	#define h 1e-4
+        	return -( u(r+h) - u(r-h) ) / (2.*h);
+        }
+        void main () {
+        	float r = U.x/R.x;
+        	#define o 1e3
+        	Q = vec4(f(r),u(r),f(r*7.),u(r*7.));
+        	Q.zw = atan(Q.zw/o)*o;
+        }
+      </script>
+      <script type="x-shader" id="many">
+        #ifdef GL_FRAGMENT_PRECISION_HIGH
+        	precision highp float;
+        #else
+        	precision mediump float;
+        #endif
+        #define Q gl_FragColor
+        #define U gl_FragCoord.xy
+        uniform vec2 R;
+        uniform vec2 cR;
+        uniform float I;
+        uniform float dt;
+        uniform vec4 mouse;
+        uniform sampler2D T;
+        uniform sampler2D S;
+        void main () {
+        	if (I<1.) {
+        		float o = 6.28318530718*U.x/R.x;
+        		Q = .1*vec4(cos(o),sin(o),0.07*cos(o),0.07*sin(o));
+        	} else {
+        		Q = texture2D(T,U/R);
+        		vec2 u = vec2(0);
+        		for (int i = 0; i < 150; i++) {
+        			u += texture2D(S,vec2(U.x,i)/R.x).xy/150.;
+        		}
+        		Q.zw += 1e-4*.1*dt*u;
+        		Q.xy += .1*dt*Q.zw;
+        		if (mouse.z>0.) {
+        			vec2 mo = mouse.xy/cR*2.-1.;
+        			mo.y *= cR.y/cR.x;
+        			vec2 v = mo-Q.xy;
+        			float l = length(v);
+        			Q.zw *= 0.999;
+        			if (l>0.) Q.zw += 1e-5*v/dot(v,v);
+        		}
+        		if (Q.x<-1.) {Q.x = -1.; Q.z*=-1.;}
+        		if (Q.y<-cR.y/cR.x) {Q.y = -cR.y/cR.x; Q.w*=-1.;}
+        		if (Q.x>1.) {Q.x = 1.; Q.z*=-1.;}
+        		if (Q.y>cR.y/cR.x) {Q.y = cR.y/cR.x; Q.w*=-1.;}
+
+        	}
+        }
+      </script>
+      <script type="x-shader" id="inter">
+        #ifdef GL_FRAGMENT_PRECISION_HIGH
+        	precision highp float;
+        #else
+        	precision mediump float;
+        #endif
+        #define Q gl_FragColor
+        #define U gl_FragCoord.xy
+        uniform vec2 R;
+        uniform float I;
+        uniform sampler2D T;
+        uniform sampler2D F;
+        void main () {
+        	vec4 a = texture2D(T,vec2(U.x,0)/R);
+        	vec4 b = texture2D(T,vec2(U.y,0)/R);
+        	vec2 u = b.xy-a.xy;
+        	float l = length(u);
+        	if (l>0.0) u = normalize(u);
+        	Q.xy = -u*texture2D(F,0.707*vec2(l)).z;
+        }
+      </script>
+      <script type="x-shader" id="displaymany">
+        #ifdef GL_FRAGMENT_PRECISION_HIGH
+        	precision highp float;
+        #else
+        	precision mediump float;
+        #endif
+        #define Q gl_FragColor
+        #define U gl_FragCoord.xy
+        uniform vec2 R;
+        uniform float I;
+        uniform vec4 mouse;
+        uniform sampler2D T;
+        uniform sampler2D F;
+        void main () {
+        	vec2 u = 2.*(U-0.5*R)/R.x;
+        	Q = vec4(1);
+        	float f = 0.;
+        	for (int i = 0; i < 150; i++) {
+        		vec4 p = texture2D(T,vec2(i,0)/150.);
+        		float r = length(p.xy-u);
+        		Q *= smoothstep(1.,4.,r*length(R));
+        		f += texture2D(F,0.707*vec2(length(p.xy-u))).w;
+        	}
+        	if (mouse.z >0.) {
+        		vec2 mo = mouse.xy/R*2.-1.;
+        		mo.y *= R.y/R.x;
+        		f += 1./length(mo-u);
+        	}
+        	Q *= 0.7+0.3*sin(f/20.+vec4(1,2,3,4));
+        	Q.w = 1.;
+        }
+      </script>
+      <script type="x-shader" id="single">
+        #ifdef GL_FRAGMENT_PRECISION_HIGH
+        	precision highp float;
+        #else
+        	precision mediump float;
+        #endif
+        #define Q gl_FragColor
+        #define U gl_FragCoord.xy
+        uniform vec2 R;
+        uniform vec2 cR;
+        uniform float I;
+        uniform float dt;
+        uniform vec4 mouse;
+        uniform sampler2D T;
+        uniform sampler2D F;
+        void main () {
+        	Q = texture2D(T, U/R);
+        	vec2 v = (Q.xy);
+        	float l = length(v);
+        	float f = texture2D(F,vec2(.707*l,0)).x;
+        	if (l>0.)
+        	Q.zw += 5e-7*dt*f*normalize(v);
+        	Q.xy += dt*Q.zw;
+        	if (Q.x<-1.) {Q.x = -1.; Q.z*=-1.;}
+        	if (Q.y<-cR.y/cR.x) {Q.y = -cR.y/cR.x; Q.w*=-1.;}
+        	if (Q.x>1.) {Q.x = 1.; Q.z*=-1.;}
+        	if (Q.y>cR.y/cR.x) {Q.y = cR.y/cR.x; Q.w*=-1.;}
+        	if (mouse.z>0.)  {
+        		Q.xy = mouse.xy/cR*2.-1.;
+        		Q.y *= cR.y/cR.x;
+        		if (length(Q.zw)>0.) Q.zw = 0.001*normalize(vec2(-1,.9)*Q.yx);
+        	}
+        	if (I < 1.) Q = vec4(0., 0.3, .0015, -.001);
+        }
+      </script>
+      <script type="x-shader" id="displaysingle">
+        #ifdef GL_FRAGMENT_PRECISION_HIGH
+        	precision highp float;
+        #else
+        	precision mediump float;
+        #endif
+        #define Q gl_FragColor
+        #define U gl_FragCoord.xy
+        uniform vec2 R;
+        uniform sampler2D P;
+        uniform sampler2D T;
+        uniform sampler2D F;
+        uniform float I;
+        void main () {
+        	vec4 p = texture2D(T, vec2(.5));
+        	vec2 u = 2.*(U-0.5*R)/R.x;
+        	float l = length(p.xy - u);
+        	float f = texture2D(F,vec2(.707*length(u),0)).y;
+        	vec3 col = (0.7+0.3*sin(f+vec3(1,2,3)));
+        	if (I < 1.) Q = vec4(col,1);
+        	else Q = mix(texture2D (P, U/R), vec4(col, 1), 0.0003);
+        	Q = mix(Q,vec4(0,0,0,1), .5*smoothstep(3.,1.,l*length(R)));
+        }
+      </script>
+      <script type="x-shader" id="wave">
+        #ifdef GL_FRAGMENT_PRECISION_HIGH
+        	precision highp float;
+        #else
+        	precision mediump float;
+        #endif
+        #define Q gl_FragColor
+        #define U gl_FragCoord.xy
+        uniform vec2 R;
+        uniform float I;
+        uniform sampler2D F;
+        uniform sampler2D T;
+        uniform float dt;
+        uniform vec4 mouse;
+        void main () {
+        	if (I < 1.0) {
+        		float o = 100.*exp(-dot(U-0.5*R,U-0.5*R));
+        		Q = vec4(1e-5,o,-.2*o,1e-5);
+        	} else {
+        		Q = texture2D(T,U/R);
+        		vec4
+        			n = texture2D(T,(U+vec2(0,1))/R),
+        			e = texture2D(T,(U+vec2(1,0))/R),
+        			s = texture2D(T,(U-vec2(0,1))/R),
+        			w = texture2D(T,(U-vec2(1,0))/R),
+        			m = 0.25*(n+e+s+w);
+        		float l = length(Q.xy);
+        		float p = texture2D(F,vec2(l)).y;
+        		Q.zw += dt*(m.xy-Q.xy-0.01*Q.xy*abs(p))+5e-4*(m.zw-Q.zw);
+        		Q.xy += dt*(Q.zw);
+        		if (mouse.z>0. && length(U-mouse.xy)<2.) Q.xy += vec2(cos(I),sin(I));
+        		if (U.x<1.||R.x-U.x<1.||R.y-U.y<1.||U.y<1.) Q.xy *= 0.;
+
+        	}
+        }
+      </script>
+      <script type="x-shader" id="displaywave">
+        #ifdef GL_FRAGMENT_PRECISION_HIGH
+        	precision highp float;
+        #else
+        	precision mediump float;
+        #endif
+        #define Q gl_FragColor
+        #define U gl_FragCoord.xy
+        uniform vec2 R;
+        uniform sampler2D T;
+        uniform sampler2D F;
+        void main () {
+        	vec4 w = texture2D(T,U/R);
+        	float f = texture2D(F,vec2(1)*length(w.xy)).w;
+        	vec3 col = sin(atan(2.*dot(w,w))*6.2+vec3(1,2,3));
+        	Q = vec4(0.5+0.5*col,1);
+        }
+      </script>
+      <script type="x-shader" id="plot">
+        #ifdef GL_FRAGMENT_PRECISION_HIGH
+        	precision highp float;
+        #else
+        	precision mediump float;
+        #endif
+        #define Q gl_FragColor
+        #define U gl_FragCoord.xy
+        uniform vec2 R;
+        uniform sampler2D F;
+        float ln (vec2 u, vec2 a, vec2 b) {
+        	u = u-a;
+            b = b-a;
+            float l = clamp(dot(u,b)/dot(b,b),0.,1.);
+            return length(u-b*l);
+        }
+        vec4 f (float x) {
+        	return texture2D(F,vec2(x/R.x));
+        }
+        vec2 plot (vec2 u) {
+        	vec4 a = f(u.x-1.), b = f(u.x), c = f(u.x+1.);
+        	return vec2(
+        		min(
+        			ln(u, vec2(u.x-1.,a.x) , vec2(u.x,b.x) ),
+        			ln(u, vec2(u.x,b.x) , vec2(u.x+1.,c.x) )
+        		),
+        		min(
+        			ln(u, vec2(u.x-1.,a.y) , vec2(u.x,b.y) ),
+        			ln(u, vec2(u.x,b.y) , vec2(u.x+1.,c.y) )
+        		)
+        	);
+        }
+        void main () {
+        	vec2 u = U;
+        	u.y = 2.*(U.y-0.5*R.y);
+        	Q.xy = smoothstep(6.,2.,plot(u));
+        	Q.z = Q.x+Q.y;
+        	Q += .5*(0.7+0.3*sin(f(U.x).y+vec4(1,2,3,4)));
+        	Q.w = 1.;
+        }
+      </script>
+    </div>
+    <script id="gl-utilities">
+      class Framebuffer {
+        constructor(gl, n, type, w, h = w, filter = "LINEAR") {
+          this.gl = gl;
+          this.type = type;
+          this.n = n;
+          this.w = w;
+          this.h = h;
+          this.width = w;
+          this.height = h;
+          this.fb0 = gl.createFramebuffer();
+          this.renderbuffer = gl.createRenderbuffer();
+          this.texture = gl.createTexture();
+          gl.activeTexture(gl["TEXTURE" + this.n]);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, this.fb0);
+          gl.bindTexture(gl.TEXTURE_2D, this.texture);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl[filter]);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl[filter]);
+          gl.texImage2D(
+            gl.TEXTURE_2D,
+            0,
+            gl.RGBA,
+            w,
+            h,
+            0,
+            gl.RGBA,
+            this.type,
+            null
+          );
+          gl.bindRenderbuffer(gl.RENDERBUFFER, this.renderbuffer);
+          gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, w, h);
+          gl.framebufferTexture2D(
+            gl.FRAMEBUFFER,
+            gl.COLOR_ATTACHMENT0,
+            gl.TEXTURE_2D,
+            this.texture,
+            0
+          );
+          gl.framebufferRenderbuffer(
+            gl.FRAMEBUFFER,
+            gl.DEPTH_ATTACHMENT,
+            gl.RENDERBUFFER,
+            this.renderbuffer
+          );
+        }
+        read() {
+          this.route();
+          var pixels = new Float32Array(this.w * this.h * 4);
+          this.gl.readPixels(
+            0,
+            0,
+            this.w,
+            this.h,
+            this.gl.RGBA,
+            this.type,
+            pixels
+          );
+          return pixels;
+        }
+        write(typedArray) {
+          this.gl.activeTexture(this.gl["TEXTURE" + this.n]);
+          this.gl.texImage2D(
+            this.gl.TEXTURE_2D,
+            0,
+            this.gl.RGBA,
+            this.w,
+            this.h,
+            0,
+            this.gl.RGBA,
+            this.type,
+            typedArray
+          );
+        }
+        source(element) {
+          this.gl.activeTexture(this.gl["TEXTURE" + this.n]);
+          this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, true);
+          this.gl.texImage2D(
+            this.gl.TEXTURE_2D,
+            0,
+            this.gl.RGBA,
+            this.gl.RGBA,
+            this.gl.UNSIGNED_BYTE,
+            element
+          );
+          this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, false);
+        }
+        route() {
+          this.gl.activeTexture(this.gl["TEXTURE" + this.n]);
+          this.gl.bindTexture(this.gl.TEXTURE_2D, this.texture);
+          this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.fb0);
+          this.gl.viewport(0, 0, this.w, this.h);
+        }
+      }
+
+      const createProgram = (gl, vstr, fstr) => {
+        vstr =
+          vstr.length < 20 && document.getElementById(vstr)
+            ? document.getElementById(vstr).textContent
+            : vstr;
+        fstr =
+          fstr.length < 20 && document.getElementById(fstr)
+            ? document.getElementById(fstr).textContent
+            : fstr;
+
+        let program = gl.createProgram();
+        let vshader = createShader(gl, vstr, gl.VERTEX_SHADER);
+        let fshader = createShader(gl, fstr, gl.FRAGMENT_SHADER);
+
+        gl.attachShader(program, vshader);
+        gl.attachShader(program, fshader);
+        gl.linkProgram(program);
+
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+          throw gl.getProgramInfoLog(program);
+        }
+        return program;
+      };
+
+      const createShader = (gl, str, type) => {
+        let shader = gl.createShader(type);
+        gl.shaderSource(shader, str);
+        gl.compileShader(shader);
+
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+          var errorString = gl.getShaderInfoLog(shader);
+          alert(errorString + str.split("\n")[errorString.split(":")[2] - 1]);
+          throw gl.getShaderInfoLog(shader);
+        }
+
+        return shader;
+      };
+
+      const initAttrib = (gl, program) => {
+        gl.useProgram(program);
+        let attrib = gl.getAttribLocation(program, "av");
+        gl.enableVertexAttribArray(attrib);
+        gl.vertexAttribPointer(attrib, 2, gl.FLOAT, gl.FALSE, 0, 0);
+        return program;
+      };
+
+      const setUni = (gl, program, name, args, int = false) => {
+        gl.useProgram(program);
+        if (!program[name])
+          program[name] = gl.getUniformLocation(program, name);
+        if (int || typeof args == "boolean") gl.uniform1i(program[name], args);
+        else if (args.constructor == Array)
+          gl["uniform" + args.length + "fv"](program[name], args);
+        else if (typeof args == "number") gl.uniform1f(program[name], args);
+        else if (args.constructor == Framebuffer)
+          gl.uniform1i(program[name], args.n);
+        return setUni;
+      };
+
+      const draw = (
+        gl,
+        program,
+        dest,
+        clear = false,
+        type = gl.TRIANGLES,
+        a = 0,
+        b = 6
+      ) => {
+        gl.useProgram(program);
+        if (dest.route == undefined) {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+          gl.viewport(0, 0, dest.width, dest.height);
+        } else dest.route();
+        if (clear) gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.drawArrays(type, a, b);
+      };
+
+      const initVerts = (gl, w = 0, h = w) => {
+        let arr = new Float32Array(w * h * 2 + 12),
+          sqr = [0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1],
+          i = 0;
+        for (j = 0; j < 12; j++) arr[i++] = sqr[j];
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            arr[i++] = x / w;
+            arr[i++] = y / h;
+          }
+        }
+        let buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
+        return arr;
+      };
+    </script>
+    <script type="text/javascript" id="text2glsl">
+      function notSpaces(s) {
+        var i;
+        for (i = 0; i < s.length; i++) {
+          if (s[i] !== " ") {
+            return true;
+          }
+        }
+        return false;
+      }
+      function bindAPow(s, index) {
+        var openParen = 0,
+          stringF = "",
+          stringB = "";
+        for (i = index + 1; i < s.length; i++) {
+          t = s[i];
+          if (
+            (t === "*" ||
+              t === ")" ||
+              t === "^" ||
+              t === "/" ||
+              (t === "-" && notSpaces(stringF)) ||
+              t === "+") &&
+            openParen < 1
+          ) {
+            break;
+          } else {
+            if (t === "(") {
+              openParen++;
+            } else if (t === ")") {
+              openParen--;
+            }
+            stringF = stringF + t;
+          }
+        }
+        openParen = 0;
+        for (i = index - 1; i >= 0; i--) {
+          t = s[i];
+          if (
+            (t === "*" ||
+              t === "^" ||
+              t === "(" ||
+              t === "/" ||
+              (t === "-" && notSpaces(stringB)) ||
+              t === "+") &&
+            openParen < 1
+          ) {
+            break;
+          } else {
+            if (t === ")") {
+              openParen++;
+            } else if (t === "(") {
+              openParen--;
+            }
+            stringB = t + stringB;
+          }
+        }
+        return {
+          rep: stringB + "^" + stringF,
+          with: "pow(" + stringB + "," + stringF + ")"
+        };
+      }
+      function bindPow(s) {
+        var i, t;
+        for (i = 0; i < s.length; i++) {
+          if (s[i] === "^") {
+            t = bindAPow(s, i);
+            s = s.replace(t.rep, t.with);
+            i = 0;
+          }
+        }
+        return s;
+      }
+      function bindAbs(s) {
+        var i, j, t, openParen;
+        for (i = 0; i < s.length; i++) {
+          if (s[i] === "|") {
+            t = "|";
+            openParen = 0;
+            for (j = i + 1; j < s.length; j++) {
+              t = t + s[j];
+              if (s[j] === "(") {
+                openParen++;
+              } else if (s[j] === ")") {
+                openParen--;
+              } else if (s[j] === "|" && openParen < 1) {
+                s = s.replace(t, "abs(" + t.substring(1, t.length - 1) + ")");
+                i = 0;
+                break;
+              }
+            }
+          }
+        }
+        return s;
+      }
+      function checkParen(s) {
+        openParen = 0;
+        for (i = 0; i < s.length; i++) {
+          if (s[i] === ")") openParen--;
+          else if (s[i] === "(") openParen++;
+        }
+        for (i = 0; i < Math.abs(openParen); i++) {
+          if (openParen > 0) {
+            s = s + ")";
+          } else {
+            s = "(" + s;
+          }
+        }
+        return s;
+      }
+      function fix(s) {
+        s = bindAbs(s);
+        s = s.replace(/arc/g, "a");
+        s = s.replace(/(tan|cos|sin)\^*-1/g, "a$1");
+        s = s.replace(
+          /pow|atan|tan|acos|asin|cos|sin|exp|log|sqrt|abs/gi,
+          function(ms) {
+            return ms.toUpperCase();
+          }
+        );
+        s = s.replace(/([xytae]|pi)/g, "($1)");
+        s = s.replace(
+          /POW|ATAN|TAN|ACOS|ASIN|COS|SIN|EXP|LOG|SQRT|ABS/g,
+          function(ms) {
+            return ms.toLowerCase();
+          }
+        );
+        s = s.replace(/(\d+\.\d+|\d+)/g, "float($1)");
+        s = s.replace(/(\))\s*(\(|\w+)/g, "$1*$2");
+        s = bindPow(s);
+        s = s.replace(/ln/g, "(1.0/log(e))*log");
+        s = checkParen(s);
+        return s;
+      }
+    </script>
+    <script type="text/javascript">
+      var canvas2D = document.getElementById("2D"),
+        canvas3D = document.getElementById("3D"),
+        ctx = canvas2D.getContext("2d"),
+        gl = canvas3D.getContext("webgl"),
+        ext = gl.getExtension("OES_texture_float"),
+        lin = gl.getExtension("OES_texture_float_linear"),
+        N_body = 150,
+        I = 0,
+        dt = 1,
+        mode = document.getElementById("ExperimentSelect").value,
+        fbo_force = new Framebuffer(gl, 0, gl.FLOAT, 1200, 1),
+        fbo_singleA = new Framebuffer(gl, 1, gl.FLOAT, 1, 1, "NEAREST"),
+        fbo_singleB = new Framebuffer(gl, 2, gl.FLOAT, 1, 1, "NEAREST"),
+        fbo_manyA = new Framebuffer(gl, 3, gl.FLOAT, N_body, 1, "NEAREST"),
+        fbo_manyB = new Framebuffer(gl, 4, gl.FLOAT, N_body, 1, "NEAREST"),
+        fbo_inter = new Framebuffer(gl, 5, gl.FLOAT, N_body, N_body, "NEAREST"),
+        fbo_waveA = new Framebuffer(
+          gl,
+          6,
+          gl.FLOAT,
+          canvas3D.width,
+          canvas3D.height
+        ),
+        fbo_waveB = new Framebuffer(
+          gl,
+          7,
+          gl.FLOAT,
+          canvas3D.width,
+          canvas3D.height
+        ),
+        verts = initVerts(gl),
+        force_A = document.getElementById("force_A").textContent,
+        force_B = document.getElementById("force_B").textContent,
+        force = createProgram(gl, "vs", force_A + "0.0" + force_B),
+        waveA = createProgram(gl, "vs", "wave"),
+        waveB = createProgram(gl, "vs", "wave"),
+        displaywave = createProgram(gl, "vs", "displaywave"),
+        manyA = createProgram(gl, "vs", "many"),
+        manyB = createProgram(gl, "vs", "many"),
+        displaymany = createProgram(gl, "vs", "displaymany"),
+        interA = createProgram(gl, "vs", "inter"),
+        interB = createProgram(gl, "vs", "inter"),
+        singleA = createProgram(gl, "vs", "single"),
+        singleB = createProgram(gl, "vs", "single"),
+        plot = createProgram(gl, "vs", "plot"),
+        displaysingleA = createProgram(gl, "vs", "displaysingle"),
+        displaysingleB = createProgram(gl, "vs", "displaysingle"),
+        displaysingleC = createProgram(gl, "vs", "displaysingle");
+      initAttrib(gl, displaywave);
+      function setI(I) {
+        setUni(gl, force, "I", I);
+        setUni(gl, waveA, "I", I);
+        setUni(gl, waveB, "I", I);
+        setUni(gl, singleA, "I", I);
+        setUni(gl, singleB, "I", I);
+        setUni(gl, interA, "I", I);
+        setUni(gl, interB, "I", I);
+        setUni(gl, manyA, "I", I);
+        setUni(gl, manyB, "I", I);
+        setUni(gl, displaysingleA, "I", I);
+        setUni(gl, displaysingleB, "I", I);
+        setUni(gl, displaysingleC, "I", I);
+      }
+      function setMouse(mouse) {
+        setUni(gl, force, "mouse", mouse);
+        setUni(gl, waveA, "mouse", mouse);
+        setUni(gl, waveB, "mouse", mouse);
+        setUni(gl, singleA, "mouse", mouse);
+        setUni(gl, singleB, "mouse", mouse);
+        setUni(gl, interA, "mouse", mouse);
+        setUni(gl, interB, "mouse", mouse);
+        setUni(gl, manyA, "mouse", mouse);
+        setUni(gl, manyB, "mouse", mouse);
+        setUni(gl, displaymany, "mouse", mouse);
+      }
+      function setdt(dt) {
+        setUni(gl, waveA, "dt", dt);
+        setUni(gl, waveB, "dt", dt);
+        setUni(gl, singleA, "dt", dt);
+        setUni(gl, singleB, "dt", dt);
+        setUni(gl, manyA, "dt", dt);
+        setUni(gl, manyB, "dt", dt);
+      }
+      function uniforms() {
+        setI(I);
+        setdt(dt);
+        setUni(gl, force, "R", [fbo_force.w, fbo_force.h]);
+        setUni(gl, waveA, "R", [fbo_waveA.w, fbo_waveA.h]);
+        setUni(gl, waveB, "R", [fbo_waveA.w, fbo_waveA.h]);
+        setUni(gl, displaywave, "R", [canvas3D.width, canvas3D.height]);
+        setUni(gl, displaysingleA, "R", [canvas3D.width, canvas3D.height]);
+        setUni(gl, displaysingleB, "R", [canvas3D.width, canvas3D.height]);
+        setUni(gl, displaysingleC, "R", [canvas3D.width, canvas3D.height]);
+        setUni(gl, displaymany, "R", [canvas3D.width, canvas3D.height]);
+        setUni(gl, plot, "R", [canvas3D.width, canvas3D.height]);
+        setUni(gl, interA, "R", [fbo_inter.w, fbo_inter.h]);
+        setUni(gl, interB, "R", [fbo_inter.w, fbo_inter.h]);
+        setUni(gl, singleA, "R", [fbo_singleA.w, fbo_singleA.h]);
+        setUni(gl, singleA, "cR", [canvas3D.width, canvas3D.height]);
+        setUni(gl, singleB, "R", [fbo_singleA.w, fbo_singleA.h]);
+        setUni(gl, singleB, "cR", [canvas3D.width, canvas3D.height]);
+        setUni(gl, manyA, "R", [fbo_manyA.w, fbo_manyA.h]);
+        setUni(gl, manyA, "cR", [canvas3D.width, canvas3D.height]);
+        setUni(gl, manyB, "R", [fbo_manyA.w, fbo_manyA.h]);
+        setUni(gl, manyB, "cR", [canvas3D.width, canvas3D.height]);
+        setUni(gl, manyA, "T", fbo_manyB);
+        setUni(gl, manyB, "T", fbo_manyA);
+        setUni(gl, waveA, "T", fbo_waveB);
+        setUni(gl, waveB, "T", fbo_waveA);
+        setUni(gl, singleA, "T", fbo_singleB);
+        setUni(gl, singleB, "T", fbo_singleA);
+        setUni(gl, manyA, "S", fbo_inter);
+        setUni(gl, manyB, "S", fbo_inter);
+        setUni(gl, interA, "T", fbo_manyA);
+        setUni(gl, interB, "T", fbo_manyB);
+        setUni(gl, displaysingleA, "T", fbo_singleA);
+        setUni(gl, displaysingleB, "T", fbo_singleB);
+        setUni(gl, displaysingleC, "T", fbo_singleB);
+        setUni(gl, displaysingleA, "P", fbo_waveB);
+        setUni(gl, displaysingleB, "P", fbo_waveA);
+        setUni(gl, displaysingleC, "P", fbo_waveB);
+        setUni(gl, displaymany, "T", fbo_manyA);
+        setUni(gl, displaywave, "T", fbo_waveA);
+        setUni(gl, interA, "F", fbo_force);
+        setUni(gl, interA, "F", fbo_force);
+        setUni(gl, displaywave, "F", fbo_force);
+        setUni(gl, waveA, "F", fbo_force);
+        setUni(gl, waveB, "F", fbo_force);
+        setUni(gl, singleA, "F", fbo_force);
+        setUni(gl, singleB, "F", fbo_force);
+        setUni(gl, displaysingleA, "F", fbo_force);
+        setUni(gl, displaysingleB, "F", fbo_force);
+        setUni(gl, displaysingleC, "F", fbo_force);
+        setUni(gl, displaymany, "F", fbo_force);
+        setUni(gl, plot, "F", fbo_force);
+      }
+      uniforms();
+      function doWave(n = 10) {
+        for (var i = 0; i < n; i++) {
+          draw(gl, waveA, fbo_waveA);
+          draw(gl, waveB, fbo_waveB);
+        }
+        draw(gl, displaywave, canvas3D);
+      }
+      function doSingle(n = 10) {
+        for (var i = 0; i < n; i++) {
+          draw(gl, singleA, fbo_singleA);
+          draw(gl, displaysingleA, fbo_waveA);
+          draw(gl, singleB, fbo_singleB);
+          draw(gl, displaysingleB, fbo_waveB);
+        }
+        draw(gl, displaysingleC, canvas3D);
+      }
+      function doMany(n = 10) {
+        for (var i = 0; i < n; i++) {
+          draw(gl, manyA, fbo_manyA);
+          draw(gl, interA, fbo_inter);
+          draw(gl, manyB, fbo_manyB);
+          draw(gl, interB, fbo_inter);
+        }
+        draw(gl, displaymany, canvas3D);
+      }
+      function doPlot() {
+        draw(gl, plot, canvas3D);
+      }
+      function updateForce() {
+        var formula = fix(document.getElementById("force").value);
+        force = createProgram(gl, "vs", force_A + formula + force_B);
+        uniforms();
+        draw(gl, force, fbo_force);
+        console.log(formula);
+      }
+      updateForce();
+      document.getElementById("force").onchange = function() {
+        updateForce();
+        I = 0;
+      };
+      document.getElementById("ExperimentSelect").onchange = function() {
+        I = 0;
+        mode = this.value;
+      };
+      document.getElementById("dt").oninput = function() {
+        dt = Number(this.value);
+        setdt(dt);
+      };
+      function animate() {
+        requestAnimationFrame(animate);
+        setI(I++);
+        draw(gl, force, fbo_force);
+        if (mode == "single") {
+          doSingle();
+        } else if (mode == "many") {
+          doMany();
+        } else if (mode == "wave") {
+          doWave();
+        } else if (mode == "plot") {
+          doPlot();
+        }
+      }
+      animate();
+      var mouse = [0, 0, 0, 0];
+      function getMousePos(canvas, evt) {
+        var rect = canvas.getBoundingClientRect(), // abs. size of element
+          scaleX = canvas.width / rect.width, // relationship bitmap vs. element for X
+          scaleY = canvas.height / rect.height; // relationship bitmap vs. element for Y
+
+        return {
+          x: (evt.clientX - rect.left) * scaleX, // scale mouse coordinates after they have
+          y: (evt.clientY - rect.top) * scaleY // been adjusted to be relative to element
+        };
+      }
+      canvas3D.onmousedown = function(e) {
+        var p = getMousePos(canvas3D, e);
+        mouse = [p.x, canvas3D.height - p.y, p.x, canvas3D.height - p.y];
+        setMouse(mouse);
+      };
+      canvas3D.onmousemove = function(e) {
+        var p = getMousePos(canvas3D, e);
+        if (mouse[0] > 0)
+          mouse = [p.x, canvas3D.height - p.y, mouse[0], mouse[1]];
+        setMouse(mouse);
+      };
+      canvas3D.onmouseout = canvas3D.onmouseup = function(e) {
+        mouse = [0, 0, 0, 0];
+        setMouse(mouse);
+      };
+    </script>
+  </body>
+</html>
